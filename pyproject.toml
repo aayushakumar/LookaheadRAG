@@ -1,0 +1,99 @@
+[project]
+name = "lookahead-rag"
+version = "0.1.0"
+description = "LookaheadRAG: Speculative Retrieval Planning for Low-Latency Multi-Hop QA"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+authors = [
+    {name = "Aayush Kumar"}
+]
+keywords = ["rag", "retrieval", "llm", "multi-hop", "question-answering", "research"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # LLM Providers (Free)
+    "ollama>=0.1.0",           # Local LLM inference
+    "groq>=0.4.0",             # Groq free tier
+    
+    # Vector Store & Embeddings
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+    
+    # Data Processing
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0.0",
+    
+    # Async & HTTP
+    "aiohttp>=3.9.0",
+    "httpx>=0.25.0",
+    
+    # Utilities
+    "tqdm>=4.65.0",
+    "rich>=13.0.0",
+    "tenacity>=8.2.0",         # Retry logic
+    
+    # Data & Evaluation
+    "datasets>=2.14.0",        # HuggingFace datasets
+    "numpy>=1.24.0",
+    "pandas>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "mypy>=1.5.0",
+    "ruff>=0.1.0",
+]
+viz = [
+    "matplotlib>=3.7.0",
+    "seaborn>=0.12.0",
+    "plotly>=5.15.0",
+]
+tracking = [
+    "wandb>=0.15.0",
+]
+all = [
+    "lookahead-rag[dev,viz,tracking]",
+]
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*", "eval*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]

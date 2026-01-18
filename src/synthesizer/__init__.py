@@ -8,6 +8,13 @@ This module handles context assembly and final answer synthesis.
 from src.synthesizer.context import ContextAssembler, AssembledContext
 from src.synthesizer.prompts import SynthesisPromptBuilder
 from src.synthesizer.synthesizer import Synthesizer, SynthesisResult
+from src.synthesizer.evidence_verifier import (
+    EvidenceVerifier,
+    VerificationResult,
+    VerificationStatus,
+    AtomicClaim,
+    VerificationMetrics,
+)
 
 __all__ = [
     "ContextAssembler",
@@ -15,4 +22,10 @@ __all__ = [
     "SynthesisPromptBuilder",
     "Synthesizer",
     "SynthesisResult",
+    "EvidenceVerifier",
+    "VerificationResult",
+    "VerificationStatus",
+    "AtomicClaim",
+    "VerificationMetrics",
 ]
+

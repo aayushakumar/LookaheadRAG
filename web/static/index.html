@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LookaheadRAG - Near-Agentic Accuracy with RAG-Like Latency</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #12121a;
+            --bg-card: rgba(20, 20, 30, 0.8);
+            --border-color: rgba(99, 102, 241, 0.2);
+            --border-glow: rgba(99, 102, 241, 0.5);
+            --accent-primary: #6366f1;
+            --accent-secondary: #8b5cf6;
+            --accent-cyan: #06b6d4;
+            --accent-green: #10b981;
+            --accent-orange: #f59e0b;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+            --glass-bg: rgba(20, 20, 30, 0.6);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Animated background grid */
+        .bg-grid {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-image: 
+                linear-gradient(rgba(99, 102, 241, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(99, 102, 241, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .bg-glow {
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 30% 30%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 70%, rgba(139, 92, 246, 0.08) 0%, transparent 50%);
+            pointer-events: none;
+            z-index: 0;
+            animation: glowMove 20s ease-in-out infinite;
+        }
+
+        @keyframes glowMove {
+            0%, 100% { transform: translate(0, 0); }
+            50% { transform: translate(-5%, -5%); }
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Header */
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding-top: 2rem;
+        }
+
+        .logo {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.02em;
+            margin-bottom: 0.5rem;
+        }
+
+        .tagline {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            font-weight: 400;
+        }
+
+        .tagline span {
+            color: var(--accent-cyan);
+            font-weight: 500;
+        }
+
+        /* Search Section */
+        .search-section {
+            max-width: 800px;
+            margin: 0 auto 3rem;
+        }
+
+        .search-container {
+            position: relative;
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 4px;
+            backdrop-filter: blur(20px);
+            transition: all 0.3s ease;
+        }
+
+        .search-container:focus-within {
+            border-color: var(--border-glow);
+            box-shadow: 0 0 30px rgba(99, 102, 241, 0.15);
+        }
+
+        .search-input {
+            width: 100%;
+            padding: 1.25rem 1.5rem;
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 1.1rem;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .search-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .search-actions {
+            display: flex;
+            gap: 0.75rem;
+            padding: 0 1rem 1rem;
+        }
+
+        .method-toggle {
+            display: flex;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            padding: 4px;
+            flex: 1;
+        }
+
+        .method-btn {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border: none;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            font-weight: 500;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .method-btn.active {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .method-btn:hover:not(.active) {
+            color: var(--text-primary);
+        }
+
+        .search-btn {
+            padding: 0.75rem 2rem;
+            background: var(--gradient-primary);
+            border: none;
+            border-radius: 10px;
+            color: white;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .search-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
+        }
+
+        .search-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .search-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Examples */
+        .examples {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            justify-content: center;
+            margin-top: 1rem;
+        }
+
+        .example-btn {
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .example-btn:hover {
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        /* Main Content Grid */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 1fr 1.2fr;
+            gap: 2rem;
+        }
+
+        @media (max-width: 1024px) {
+            .main-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Cards */
+        .card {
+            background: var(--glass-bg);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 1.5rem;
+            backdrop-filter: blur(20px);
+        }
+
+        .card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+        }
+
+        .card-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .card-title svg {
+            width: 18px;
+            height: 18px;
+            color: var(--accent-primary);
+        }
+
+        /* Pipeline Visualization */
+        .pipeline-container {
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .pipeline-nodes {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            padding: 1rem 0;
+        }
+
+        .pipeline-node {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            position: relative;
+            transition: all 0.3s ease;
+            opacity: 0;
+            transform: translateX(-20px);
+        }
+
+        .pipeline-node.visible {
+            opacity: 1;
+            transform: translateX(0);
+        }
+
+        .pipeline-node.active {
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
+        }
+
+        .pipeline-node.complete {
+            border-color: var(--accent-green);
+        }
+
+        .node-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .node-id {
+            width: 28px;
+            height: 28px;
+            background: var(--gradient-primary);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .node-op {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--accent-cyan);
+            background: rgba(6, 182, 212, 0.1);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .node-confidence {
+            margin-left: auto;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .node-query {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .node-deps {
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 2rem;
+        }
+
+        .empty-state svg {
+            width: 48px;
+            height: 48px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Answer Section */
+        .answer-container {
+            min-height: 400px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .answer-content {
+            flex: 1;
+            font-size: 1.1rem;
+            line-height: 1.8;
+            color: var(--text-primary);
+        }
+
+        .answer-content.streaming {
+            position: relative;
+        }
+
+        .answer-content.streaming::after {
+            content: '▊';
+            animation: blink 1s step-end infinite;
+            color: var(--accent-primary);
+        }
+
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        .citation {
+            color: var(--accent-cyan);
+            font-size: 0.85rem;
+            font-family: 'JetBrains Mono', monospace;
+            cursor: help;
+        }
+
+        /* Metrics */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 1rem;
+            margin-top: 1.5rem;
+        }
+
+        @media (max-width: 768px) {
+            .metrics-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .metric-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .metric-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            background: var(--gradient-primary);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .metric-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: 0.25rem;
+        }
+
+        /* Loading Spinner */
+        .loading-spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Footer */
+        footer {
+            text-align: center;
+            padding: 3rem 0 2rem;
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Comparison Badge */
+        .method-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .method-badge.lookahead {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--accent-primary);
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .method-badge.standard {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--accent-green);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+        }
+
+        /* Stage Progress */
+        .stages {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .stage {
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            background: var(--bg-secondary);
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+            transition: all 0.3s ease;
+        }
+
+        .stage.active {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--accent-primary);
+            border-color: var(--accent-primary);
+        }
+
+        .stage.complete {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-green);
+            border-color: var(--accent-green);
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-grid"></div>
+    <div class="bg-glow"></div>
+
+    <div class="container">
+        <header>
+            <h1 class="logo">LookaheadRAG</h1>
+            <p class="tagline">Near-Agentic Accuracy with <span>RAG-Like Latency</span></p>
+        </header>
+
+        <section class="search-section">
+            <div class="search-container">
+                <input 
+                    type="text" 
+                    class="search-input" 
+                    id="questionInput"
+                    placeholder="Ask a multi-hop question..."
+                    autocomplete="off"
+                >
+                <div class="search-actions">
+                    <div class="method-toggle">
+                        <button class="method-btn active" data-method="lookahead">LookaheadRAG</button>
+                        <button class="method-btn" data-method="standard">Standard RAG</button>
+                    </div>
+                    <button class="search-btn" id="searchBtn">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                        </svg>
+                        Search
+                    </button>
+                </div>
+            </div>
+            
+            <div class="examples" id="examples">
+                <!-- Populated by JS -->
+            </div>
+        </section>
+
+        <div class="main-grid">
+            <!-- Pipeline Visualization -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                        </svg>
+                        Retrieval Plan
+                    </h2>
+                    <span class="method-badge lookahead" id="methodBadge">LookaheadRAG</span>
+                </div>
+                
+                <div class="stages" id="stages">
+                    <span class="stage" data-stage="planning">Planning</span>
+                    <span class="stage" data-stage="retrieval">Retrieval</span>
+                    <span class="stage" data-stage="reranking">Reranking</span>
+                    <span class="stage" data-stage="synthesis">Synthesis</span>
+                </div>
+
+                <div class="pipeline-container">
+                    <div class="pipeline-nodes" id="pipelineNodes">
+                        <div class="empty-state">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                            </svg>
+                            <p>Enter a question to see the retrieval plan</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Answer Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                        </svg>
+                        Answer
+                    </h2>
+                </div>
+
+                <div class="answer-container">
+                    <div class="answer-content" id="answerContent">
+                        <div class="empty-state">
+                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path>
+                            </svg>
+                            <p>Your answer will appear here</p>
+                        </div>
+                    </div>
+
+                    <div class="metrics-grid" id="metricsGrid" style="display: none;">
+                        <div class="metric-card">
+                            <div class="metric-value" id="metricLatency">-</div>
+                            <div class="metric-label">Latency</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="metricChunks">-</div>
+                            <div class="metric-label">Chunks</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="metricLLMCalls">-</div>
+                            <div class="metric-label">LLM Calls</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-value" id="metricNodes">-</div>
+                            <div class="metric-label">Plan Nodes</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer>
+            <p>Built by <strong>Aayush Kumar</strong> • <a href="https://github.com/aayushkumar/LookaheadRAG" target="_blank">GitHub</a></p>
+        </footer>
+    </div>
+
+    <script>
+        // State
+        let selectedMethod = 'lookahead';
+        let isLoading = false;
+
+        // DOM Elements
+        const questionInput = document.getElementById('questionInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const examplesContainer = document.getElementById('examples');
+        const pipelineNodes = document.getElementById('pipelineNodes');
+        const answerContent = document.getElementById('answerContent');
+        const metricsGrid = document.getElementById('metricsGrid');
+        const methodBadge = document.getElementById('methodBadge');
+        const stages = document.querySelectorAll('.stage');
+        const methodBtns = document.querySelectorAll('.method-btn');
+
+        // Example questions
+        const examples = [
+            "Are the Laleli Mosque and Esma Sultan Mansion located in the same neighborhood?",
+            "Who was known by his stage name Aladin and worked as a consultant?",
+            "Were Scott Derrickson and Ed Wood of the same nationality?",
+            "Who is older, Annie Morton or Terry Richardson?",
+        ];
+
+        // Initialize
+        function init() {
+            // Render examples
+            examples.forEach(q => {
+                const btn = document.createElement('button');
+                btn.className = 'example-btn';
+                btn.textContent = q.length > 50 ? q.substring(0, 50) + '...' : q;
+                btn.title = q;
+                btn.onclick = () => {
+                    questionInput.value = q;
+                    handleSearch();
+                };
+                examplesContainer.appendChild(btn);
+            });
+
+            // Method toggle
+            methodBtns.forEach(btn => {
+                btn.onclick = () => {
+                    methodBtns.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    selectedMethod = btn.dataset.method;
+                    updateMethodBadge();
+                };
+            });
+
+            // Search handlers
+            searchBtn.onclick = handleSearch;
+            questionInput.onkeydown = (e) => {
+                if (e.key === 'Enter') handleSearch();
+            };
+        }
+
+        function updateMethodBadge() {
+            methodBadge.className = `method-badge ${selectedMethod}`;
+            methodBadge.textContent = selectedMethod === 'lookahead' ? 'LookaheadRAG' : 'Standard RAG';
+        }
+
+        function setStage(stageName, status) {
+            stages.forEach(s => {
+                if (s.dataset.stage === stageName) {
+                    s.className = `stage ${status}`;
+                }
+            });
+        }
+
+        function resetStages() {
+            stages.forEach(s => s.className = 'stage');
+        }
+
+        async function handleSearch() {
+            const question = questionInput.value.trim();
+            if (!question || isLoading) return;
+
+            isLoading = true;
+            searchBtn.disabled = true;
+            searchBtn.innerHTML = '<span class="loading-spinner"></span> Processing...';
+            
+            // Reset UI
+            resetStages();
+            pipelineNodes.innerHTML = '';
+            answerContent.innerHTML = '<div class="empty-state"><span class="loading-spinner"></span><p>Generating answer...</p></div>';
+            metricsGrid.style.display = 'none';
+
+            // Simulate stages
+            setStage('planning', 'active');
+
+            try {
+                const response = await fetch('/api/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: question,
+                        method: selectedMethod,
+                    }),
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                const data = await response.json();
+                
+                // Update stages
+                setStage('planning', 'complete');
+                setStage('retrieval', 'complete');
+                setStage('reranking', 'complete');
+                setStage('synthesis', 'complete');
+
+                // Render plan nodes with animation
+                if (data.plan_nodes && data.plan_nodes.length > 0) {
+                    renderPlanNodes(data.plan_nodes);
+                } else {
+                    pipelineNodes.innerHTML = `
+                        <div class="empty-state">
+                            <p>Standard RAG uses a single query</p>
+                        </div>
+                    `;
+                }
+
+                // Render answer with typing effect
+                await typeAnswer(data.answer);
+
+                // Show metrics
+                document.getElementById('metricLatency').textContent = `${(data.latency_ms / 1000).toFixed(1)}s`;
+                document.getElementById('metricChunks').textContent = data.retrieved_chunks;
+                document.getElementById('metricLLMCalls').textContent = data.llm_calls;
+                document.getElementById('metricNodes').textContent = data.plan_nodes?.length || 1;
+                metricsGrid.style.display = 'grid';
+
+            } catch (error) {
+                answerContent.innerHTML = `
+                    <div class="empty-state">
+                        <p style="color: #ef4444;">Error: ${error.message}</p>
+                        <p style="font-size: 0.85rem; margin-top: 0.5rem;">Make sure the server is running</p>
+                    </div>
+                `;
+            } finally {
+                isLoading = false;
+                searchBtn.disabled = false;
+                searchBtn.innerHTML = `
+                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
+                    </svg>
+                    Search
+                `;
+            }
+        }
+
+        function renderPlanNodes(nodes) {
+            pipelineNodes.innerHTML = '';
+            
+            nodes.forEach((node, index) => {
+                const div = document.createElement('div');
+                div.className = 'pipeline-node';
+                div.innerHTML = `
+                    <div class="node-header">
+                        <span class="node-id">${node.id}</span>
+                        <span class="node-op">${node.op}</span>
+                        <span class="node-confidence">${(node.confidence * 100).toFixed(0)}%</span>
+                    </div>
+                    <div class="node-query">${node.query}</div>
+                    ${node.depends_on?.length > 0 ? `<div class="node-deps">Depends on: ${node.depends_on.join(', ')}</div>` : ''}
+                `;
+                pipelineNodes.appendChild(div);
+                
+                // Animate in
+                setTimeout(() => {
+                    div.classList.add('visible', 'complete');
+                }, index * 150);
+            });
+        }
+
+        async function typeAnswer(text) {
+            answerContent.innerHTML = '';
+            answerContent.classList.add('streaming');
+            
+            // Parse and render text with citations
+            const words = text.split(' ');
+            for (let i = 0; i < words.length; i++) {
+                let word = words[i];
+                
+                // Check for citations
+                if (word.match(/\[n\d+\.\d+\]/)) {
+                    word = `<span class="citation">${word}</span>`;
+                }
+                
+                answerContent.innerHTML += word + ' ';
+                
+                // Typing delay
+                if (i % 3 === 0) {
+                    await new Promise(r => setTimeout(r, 20));
+                }
+            }
+            
+            answerContent.classList.remove('streaming');
+        }
+
+        // Initialize on load
+        init();
+    </script>
+</body>
+</html>

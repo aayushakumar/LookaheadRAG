@@ -14,6 +14,7 @@ from typing import Any
 
 from src.config import Config, get_config
 from src.planner.schema import PlanGraph, PlanNode
+from src.planner.binding_resolver import BindingResolver, BindingContext, ExtractedEntity
 from src.retriever.vector_store import VectorStore, SearchResult
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,25 @@ class RetrievalResult:
             for nr in self.node_results
         }
     
+    def get_chunks_by_node(self) -> dict[str, list[str]]:
+        """Get text chunks grouped by node ID (for binding extraction)."""
+        return {
+            nr.node_id: [r.document.content for r in nr.results]
+            for nr in self.node_results
+        }
+    
+    def get_chunks_for_node(self, node_id: str) -> list[str]:
+        """Get text chunks for a specific node."""
+        for nr in self.node_results:
+            if nr.node_id == node_id:
+                return [r.document.content for r in nr.results]
+        return []
+    
+    @property
+    def total_chunks(self) -> int:
+        """Total number of retrieved chunks across all nodes."""
+        return sum(len(nr.results) for nr in self.node_results)
+    
     def get_provenance(self) -> dict[str, list[str]]:
         """Get provenance mapping: node_id -> document_ids."""
         return {
@@ -91,18 +111,21 @@ class ParallelRetriever:
         start_time = time.time()
         
         try:
+            # Use effective query (bound or original)
+            query = node.get_effective_query()
+            
             # Run in executor to avoid blocking
             loop = asyncio.get_event_loop()
             results = await loop.run_in_executor(
                 None,
-                lambda: self.vector_store.search(node.query, top_k=top_k),
+                lambda: self.vector_store.search(query, top_k=top_k),
             )
             
             latency = (time.time() - start_time) * 1000
             
             return NodeRetrievalResult(
                 node_id=node.id,
-                query=node.query,
+                query=query,  # Use the effective query (may be bound)
                 results=results,
                 latency_ms=latency,
             )

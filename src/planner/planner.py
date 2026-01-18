@@ -16,12 +16,12 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from src.config import Config, get_config
-from src.planner.schema import PlanGraph, PlanNode, OperatorType
+from src.planner.schema import PlanGraph, PlanNode, OperatorType, ProducedVariable, EntityType
 
 logger = logging.getLogger(__name__)
 
 
-# Planner system prompt
+# Planner system prompt with variable binding support
 PLANNER_SYSTEM_PROMPT = """You are a retrieval planner for a multi-hop question answering system.
 
 Given a question, you must generate a retrieval plan as a JSON object. The plan specifies what sub-queries to execute to gather evidence for answering the question.
@@ -33,18 +33,17 @@ Return ONLY valid JSON with this structure:
   "nodes": [
     {
       "id": "n1",
-      "query": "<search query for this node>",
+      "query": "<search query>",
       "op": "<operator type>",
       "depends_on": [],
       "confidence": <0.0-1.0>,
-      "budget_cost": 1
+      "budget_cost": 1,
+      "produces": [{"var": "<name>", "type": "<entity_type>", "description": "<what this extracts>"}],
+      "bindings": {"<var>": "<source_node.var>"},
+      "required_inputs": ["<var>"]
     }
   ],
-  "global": {
-    "max_nodes": 5,
-    "max_parallel_queries": 5,
-    "fallback_allowed": true
-  }
+  "global": {"max_nodes": 5, "max_parallel_queries": 5, "fallback_allowed": true}
 }
 
 ## Operator Types
@@ -53,29 +52,70 @@ Return ONLY valid JSON with this structure:
 - "filter": Apply constraints (dates, types, categories)
 - "compare": Compare two or more items
 - "aggregate": Count, list, or summarize
-- "verify": Support or refute a claim
+- "verify": Support or refute with evidence
+
+## Variable Binding (for multi-hop queries)
+- Use {placeholder} in query for values filled from upstream results
+- "produces": List entities this node extracts (var, type, description)
+- "bindings": Map placeholders to sources, e.g., {"person": "n1.person"}
+- "required_inputs": Placeholders that MUST be resolved before execution
+- Entity types: person, organization, location, date, work_of_art, number, event, other
 
 ## Rules
 1. Generate 2-5 diverse search queries
 2. Each query must be distinct and non-overlapping
-3. Use dependencies to model multi-hop reasoning (node n2 depends on n1 if n1's result is needed first)
+3. Use dependencies + bindings to model multi-hop reasoning
 4. Assign confidence 0.6-0.9 for straightforward queries, 0.3-0.6 for uncertain ones
-5. For multi-hop questions, ensure at least 2 nodes with proper dependencies
+5. For multi-hop questions, use produces/bindings to chain entity extraction
 6. Keep queries concise and searchable
 
-## Example
-Question: "Who wrote the novel that features the character Sherlock Holmes, and when was that author born?"
-
+## Example 1 (Simple)
+Question: "When was Albert Einstein born?"
 {
-  "question": "Who wrote the novel that features the character Sherlock Holmes, and when was that author born?",
   "nodes": [
-    {"id": "n1", "query": "Sherlock Holmes novel author", "op": "lookup", "depends_on": [], "confidence": 0.85, "budget_cost": 1},
-    {"id": "n2", "query": "Arthur Conan Doyle birth date", "op": "lookup", "depends_on": ["n1"], "confidence": 0.80, "budget_cost": 1}
-  ],
-  "global": {"max_nodes": 5, "max_parallel_queries": 5, "fallback_allowed": true}
+    {"id": "n1", "query": "Albert Einstein birth date", "op": "lookup", "depends_on": [], "confidence": 0.9, "budget_cost": 1}
+  ]
+}
+
+## Example 2 (Multi-hop with Bindings)
+Question: "Who directed films starring the actress who won the Oscar for La La Land?"
+{
+  "nodes": [
+    {
+      "id": "n1",
+      "query": "La La Land Oscar winner Best Actress",
+      "op": "lookup",
+      "depends_on": [],
+      "confidence": 0.85,
+      "budget_cost": 1,
+      "produces": [{"var": "actress", "type": "person", "description": "Oscar-winning actress from La La Land"}]
+    },
+    {
+      "id": "n2",
+      "query": "{actress} filmography movies",
+      "op": "bridge",
+      "depends_on": ["n1"],
+      "confidence": 0.75,
+      "budget_cost": 1,
+      "bindings": {"actress": "n1.actress"},
+      "required_inputs": ["actress"],
+      "produces": [{"var": "films", "type": "work_of_art", "description": "Films starring the actress"}]
+    },
+    {
+      "id": "n3",
+      "query": "{actress} films director",
+      "op": "lookup",
+      "depends_on": ["n1"],
+      "confidence": 0.80,
+      "budget_cost": 1,
+      "bindings": {"actress": "n1.actress"},
+      "required_inputs": ["actress"]
+    }
+  ]
 }
 
 Now generate a plan for the following question. Return ONLY the JSON, no explanation."""
+
 
 
 class BasePlanner(ABC):
@@ -253,19 +293,36 @@ class LLMPlanner(BasePlanner):
         
         # Convert to PlanGraph
         try:
+            nodes = []
+            for node in data.get("nodes", []):
+                # Parse produces if present
+                produces = []
+                for p in node.get("produces", []):
+                    try:
+                        produces.append(ProducedVariable(
+                            var=p.get("var", "entity"),
+                            type=EntityType(p.get("type", "other")),
+                            description=p.get("description", ""),
+                        ))
+                    except (ValueError, KeyError) as e:
+                        logger.warning(f"Failed to parse produces: {e}")
+                
+                plan_node = PlanNode(
+                    id=node["id"],
+                    query=node["query"],
+                    op=OperatorType(node.get("op", "lookup")),
+                    depends_on=node.get("depends_on", []),
+                    confidence=node.get("confidence", 0.5),
+                    budget_cost=node.get("budget_cost", 1),
+                    produces=produces,
+                    bindings=node.get("bindings", {}),
+                    required_inputs=node.get("required_inputs", []),
+                )
+                nodes.append(plan_node)
+            
             plan = PlanGraph(
                 question=data.get("question", question),
-                nodes=[
-                    PlanNode(
-                        id=node["id"],
-                        query=node["query"],
-                        op=OperatorType(node.get("op", "lookup")),
-                        depends_on=node.get("depends_on", []),
-                        confidence=node.get("confidence", 0.5),
-                        budget_cost=node.get("budget_cost", 1),
-                    )
-                    for node in data.get("nodes", [])
-                ],
+                nodes=nodes,
                 planner_model=self._get_model_name(),
                 generation_time_ms=generation_time * 1000,
             )

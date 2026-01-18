@@ -8,7 +8,7 @@ dependencies, operators, and confidence scores.
 """
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -21,6 +21,46 @@ class OperatorType(str, Enum):
     COMPARE = "compare"     # A vs B comparison
     AGGREGATE = "aggregate" # Count/list operations
     VERIFY = "verify"       # Support/refute with evidence
+
+
+class EntityType(str, Enum):
+    """Types of entities that can be extracted and bound."""
+    PERSON = "person"
+    ORGANIZATION = "organization"
+    LOCATION = "location"
+    DATE = "date"
+    WORK_OF_ART = "work_of_art"
+    NUMBER = "number"
+    EVENT = "event"
+    OTHER = "other"
+
+
+class ProducedVariable(BaseModel):
+    """A typed variable that a node produces for downstream binding."""
+    
+    var: str = Field(
+        ...,
+        description="Variable name (e.g., 'person', 'director')",
+        min_length=1,
+        max_length=50,
+    )
+    type: EntityType = Field(
+        default=EntityType.OTHER,
+        description="Expected entity type",
+    )
+    description: str = Field(
+        default="",
+        description="Human-readable description (e.g., 'Oscar-winning actress')",
+        max_length=200,
+    )
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "var": self.var,
+            "type": self.type.value,
+            "description": self.description,
+        }
 
 
 class PlanNode(BaseModel):
@@ -58,6 +98,30 @@ class PlanNode(BaseModel):
         ge=1,
     )
     
+    # === Variable Binding (v2) ===
+    produces: list[ProducedVariable] = Field(
+        default_factory=list,
+        description="Typed variables this node produces for downstream binding",
+    )
+    bindings: dict[str, str] = Field(
+        default_factory=dict,
+        description="Variable mappings, e.g., {'actress': 'n1.person'}",
+    )
+    required_inputs: list[str] = Field(
+        default_factory=list,
+        description="Variables that must be bound before execution",
+    )
+    
+    # Runtime binding state (populated during execution)
+    bound_query: str | None = Field(
+        default=None,
+        description="Query after variable resolution",
+    )
+    binding_citations: dict[str, str] = Field(
+        default_factory=dict,
+        description="Citation for each resolved binding, e.g., {'actress': '[n1.2]'}",
+    )
+    
     # Optional metadata for analysis
     reasoning: str | None = Field(
         default=None,
@@ -84,9 +148,55 @@ class PlanNode(BaseModel):
             raise ValueError("Duplicate dependencies not allowed")
         return v
     
+    @model_validator(mode="after")
+    def validate_bindings(self) -> "PlanNode":
+        """Ensure all required_inputs have corresponding bindings."""
+        for var in self.required_inputs:
+            if var not in self.bindings:
+                raise ValueError(
+                    f"required_input '{var}' has no corresponding binding"
+                )
+        return self
+    
+    def has_placeholders(self) -> bool:
+        """Check if query contains unresolved placeholders."""
+        import re
+        return bool(re.search(r'\{[a-zA-Z_]+\}', self.query))
+    
+    def can_execute(self, resolved_vars: set[str]) -> bool:
+        """
+        Check if this node can execute given resolved variables.
+        
+        A node can execute if all required_inputs are in resolved_vars.
+        """
+        return all(var in resolved_vars for var in self.required_inputs)
+    
+    def resolve_bindings(self, context: dict[str, str]) -> str:
+        """
+        Resolve placeholders using binding context.
+        
+        Args:
+            context: Mapping of "node_id.var" -> resolved value
+            
+        Returns:
+            Resolved query string
+        """
+        resolved = self.query
+        for var, source in self.bindings.items():
+            placeholder = "{" + var + "}"
+            if source in context:
+                resolved = resolved.replace(placeholder, context[source])
+                self.binding_citations[var] = f"[{source}]"
+        self.bound_query = resolved
+        return resolved
+    
+    def get_effective_query(self) -> str:
+        """Get the query to use for retrieval (bound or original)."""
+        return self.bound_query if self.bound_query else self.query
+    
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
-        return {
+        result = {
             "id": self.id,
             "query": self.query,
             "op": self.op.value,
@@ -94,6 +204,16 @@ class PlanNode(BaseModel):
             "confidence": self.confidence,
             "budget_cost": self.budget_cost,
         }
+        # Include binding fields if present
+        if self.produces:
+            result["produces"] = [p.to_dict() for p in self.produces]
+        if self.bindings:
+            result["bindings"] = self.bindings
+        if self.required_inputs:
+            result["required_inputs"] = self.required_inputs
+        if self.bound_query:
+            result["bound_query"] = self.bound_query
+        return result
 
 
 class GlobalSettings(BaseModel):
